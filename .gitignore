@@ -9,8 +9,8 @@ __pycache__/
 *.pyo
 
 # Data files (large, should not be on GitHub)
-data/raw/*.csv
-data/processed/
+#data/raw/*.csv
+#data/processed/
 
 # Logs and temporary files
 *.log
