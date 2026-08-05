@@ -11,6 +11,27 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.elo import compute_elo
 from src.data_loader import load_data
+# Add at the top with other imports
+from src.features import compute_recent_form, compute_goal_diff_avg
+
+# After loading elo_dict, create a global dataframe
+team_form_cache = {}
+team_gd_cache = {}
+
+def get_team_form(team, elo_dict):
+    """Get recent form for a team, cached for speed."""
+    if team not in team_form_cache:
+        # Load the full dataset
+        df = load_data()
+        team_form_cache[team] = compute_recent_form(df, team, pd.Timestamp.now(), 5)
+    return team_form_cache[team]
+
+def get_team_gd_avg(team, elo_dict):
+    """Get goal difference average for a team, cached for speed."""
+    if team not in team_gd_cache:
+        df = load_data()
+        team_gd_cache[team] = compute_goal_diff_avg(df, team, pd.Timestamp.now(), 5)
+    return team_gd_cache[team]
 
 # --- Define groups ---
 groups = {
@@ -94,13 +115,26 @@ def load_elo_data():
 def predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutral=True):
     home_elo = elo_dict.get(home, 1500)
     away_elo = elo_dict.get(away, 1500)
+    
+    # Get form and goal diff from a pre-computed dictionary
+    # You'll need to compute these on the fly or pre-load them
+    home_form = get_team_form(home)  # You need to implement this
+    away_form = get_team_form(away)
+    home_gd_avg = get_team_gd_avg(home)
+    away_gd_avg = get_team_gd_avg(away)
+    
     features = pd.DataFrame([{
         'elo_diff': home_elo - away_elo,
         'elo_abs_diff': abs(home_elo - away_elo),
         'avg_elo': (home_elo + away_elo) / 2,
         'is_friendly': 0,
-        'is_neutral': 1 if neutral else 0
+        'is_neutral': 1 if neutral else 0,
+        'home_form': home_form,      # ✅ NEW
+        'away_form': away_form,      # ✅ NEW
+        'home_gd_avg': home_gd_avg,  # ✅ NEW
+        'away_gd_avg': away_gd_avg   # ✅ NEW
     }])
+    
     X_scaled = scaler.transform(features[feature_cols])
     probs = model.predict_proba(X_scaled)[0]
     return probs
@@ -123,7 +157,7 @@ def simulate_penalty_shootout():
 
 def simulate_match_score(home, away, elo_dict, model, scaler, feature_cols, neutral=True):
     # Get match probabilities from the model
-    probs = predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutral)
+    probs = predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutral=True)
     outcome = np.random.choice([0, 1, 2], p=probs)
     
     home_elo = elo_dict.get(home, 1500)
@@ -542,7 +576,7 @@ with tab3:
     if 'mc_runs' not in st.session_state:
         st.session_state['mc_runs'] = 0
     
-    num_sims = st.slider("Number of simulations", 100, 5000, 1000, step=100)
+    num_sims = st.slider("Number of simulations", 100, 50000, 10000, step=100)
     
     if st.button("🏃 Run Monte Carlo", type="primary", use_container_width=True):
         with st.spinner(f"Running {num_sims} simulations..."):

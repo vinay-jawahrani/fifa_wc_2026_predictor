@@ -19,7 +19,17 @@ print("🔧 Creating features...")
 df = create_features(df)  # This already filters to post-2022
 
 # Step 2: Define features and target
-feature_cols = ['elo_diff', 'elo_abs_diff', 'avg_elo', 'is_friendly', 'is_neutral']
+feature_cols = [
+    'elo_diff',
+    'elo_abs_diff',
+    'avg_elo',
+    'is_friendly',
+    'is_neutral',
+    'home_form',      # ✅ NEW
+    'away_form',      # ✅ NEW
+    'home_gd_avg',    # ✅ NEW
+    'away_gd_avg'     # ✅ NEW
+]
 X = df[feature_cols]
 y = df['result']
 
