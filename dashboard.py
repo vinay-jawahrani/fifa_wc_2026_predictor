@@ -18,20 +18,7 @@ from src.features import compute_recent_form, compute_goal_diff_avg
 team_form_cache = {}
 team_gd_cache = {}
 
-def get_team_form(team, elo_dict):
-    """Get recent form for a team, cached for speed."""
-    if team not in team_form_cache:
-        # Load the full dataset
-        df = load_data()
-        team_form_cache[team] = compute_recent_form(df, team, pd.Timestamp.now(), 5)
-    return team_form_cache[team]
 
-def get_team_gd_avg(team, elo_dict):
-    """Get goal difference average for a team, cached for speed."""
-    if team not in team_gd_cache:
-        df = load_data()
-        team_gd_cache[team] = compute_goal_diff_avg(df, team, pd.Timestamp.now(), 5)
-    return team_gd_cache[team]
 
 # --- Define groups ---
 groups = {
@@ -110,6 +97,20 @@ def load_elo_data():
     except Exception as e:
         st.error(f"Failed to load Elo data: {e}")
         return {}
+def get_team_form(team, elo_dict):
+    """Get recent form for a team, cached for speed."""
+    if team not in team_form_cache:
+        # Load the full dataset
+        df = load_data()
+        team_form_cache[team] = compute_recent_form(df, team, pd.Timestamp.now(), 5)
+    return team_form_cache[team]
+
+def get_team_gd_avg(team, elo_dict):
+    """Get goal difference average for a team, cached for speed."""
+    if team not in team_gd_cache:
+        df = load_data()
+        team_gd_cache[team] = compute_goal_diff_avg(df, team, pd.Timestamp.now(), 5)
+    return team_gd_cache[team]
 
 # --- Simulation Functions ---
 def predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutral=True):
