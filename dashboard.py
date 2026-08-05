@@ -6,21 +6,72 @@ import sys
 import os
 from itertools import combinations
 import random
+import requests
+from pathlib import Path
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.elo import compute_elo
 from src.data_loader import load_data
-# Add at the top with other imports
 from src.features import compute_recent_form, compute_goal_diff_avg
 
-# After loading elo_dict, create a global dataframe
-team_form_cache = {}
-team_gd_cache = {}
+# ============================================================
+# DATASET DOWNLOADER
+# ============================================================
+def download_dataset():
+    data_path = Path('data/raw/results.csv')
+    if data_path.exists():
+        return True
+    
+    data_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    urls = [
+        "https://raw.githubusercontent.com/vinay-jawahrani/fifa_wc_2026_predictor/main/data/raw/results.csv",
+    ]
+    
+    for url in urls:
+        try:
+            response = requests.get(url, timeout=30)
+            if response.status_code == 200:
+                data_path.write_bytes(response.content)
+                st.success("✅ Dataset downloaded successfully!")
+                return True
+        except:
+            continue
+    
+    st.warning("⚠️ Could not download dataset. Using MOCK DATA.")
+    create_mock_dataset()
+    return False
 
+def create_mock_dataset():
+    data_path = Path('data/raw/results.csv')
+    data_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    teams = ['Brazil', 'Argentina', 'France', 'England', 'Spain', 'Germany', 
+             'Portugal', 'Netherlands', 'Italy', 'Belgium', 'Croatia', 'Mexico']
+    dates = pd.date_range('2020-01-01', periods=500)
+    
+    mock_data = []
+    for _ in range(500):
+        home = random.choice(teams)
+        away = random.choice([t for t in teams if t != home])
+        mock_data.append({
+            'date': random.choice(dates),
+            'home_team': home,
+            'away_team': away,
+            'home_score': random.randint(0, 4),
+            'away_score': random.randint(0, 4),
+            'tournament': random.choice(['Friendly', 'World Cup', 'Euro', 'Copa America']),
+            'neutral': random.choice([True, False])
+        })
+    df = pd.DataFrame(mock_data)
+    df.to_csv(data_path, index=False)
 
+download_dataset()
 
-# --- Define groups ---
+# ============================================================
+# GROUPS
+# ============================================================
 groups = {
     'A': ['Mexico', 'South Africa', 'South Korea', 'Czechia'],
     'B': ['Canada', 'Bosnia and Herzegovina', 'Qatar', 'Switzerland'],
@@ -67,7 +118,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Cached Loaders ---
+# ============================================================
+# CACHED LOADERS
+# ============================================================
 @st.cache_resource
 def load_model():
     try:
@@ -76,14 +129,14 @@ def load_model():
         feature_cols = joblib.load('models/feature_columns.pkl')
         return model, scaler, feature_cols
     except Exception as e:
-        st.error(f"Model not found. Error: {e}")
+        st.warning(f"Model not found. Running in demo mode. Error: {e}")
         return None, None, None
 
 @st.cache_data
 def load_elo_data():
     try:
         df = load_data()
-        df = compute_elo(df)
+        df = compute_elo(df, initial_rating=1500, k=30, margin_multiplier=0.5)
         latest_elos = {}
         all_teams = set(df['home_team']).union(set(df['away_team']))
         for team in all_teams:
@@ -95,31 +148,37 @@ def load_elo_data():
                 latest_elos[team] = away_elos.iloc[-1]
         return latest_elos
     except Exception as e:
-        st.error(f"Failed to load Elo data: {e}")
-        return {}
-def get_team_form(team, elo_dict):
-    """Get recent form for a team, cached for speed."""
+        st.warning(f"Elo data not available. Using default ratings. Error: {e}")
+        return {team: 1500 for group in groups.values() for team in group}
+
+# ============================================================
+# TEAM FORM AND GD CACHE
+# ============================================================
+team_form_cache = {}
+team_gd_cache = {}
+
+def get_team_form(team):
     if team not in team_form_cache:
-        # Load the full dataset
         df = load_data()
-        team_form_cache[team] = compute_recent_form(df, team, pd.Timestamp.now(), 5)
+        latest_date = df['date'].max()
+        team_form_cache[team] = compute_recent_form(df, team, latest_date, 5)
     return team_form_cache[team]
 
-def get_team_gd_avg(team, elo_dict):
-    """Get goal difference average for a team, cached for speed."""
+def get_team_gd_avg(team):
     if team not in team_gd_cache:
         df = load_data()
-        team_gd_cache[team] = compute_goal_diff_avg(df, team, pd.Timestamp.now(), 5)
+        latest_date = df['date'].max()
+        team_gd_cache[team] = compute_goal_diff_avg(df, team, latest_date, 5)
     return team_gd_cache[team]
 
-# --- Simulation Functions ---
+# ============================================================
+# SIMULATION FUNCTIONS
+# ============================================================
 def predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutral=True):
     home_elo = elo_dict.get(home, 1500)
     away_elo = elo_dict.get(away, 1500)
     
-    # Get form and goal diff from a pre-computed dictionary
-    # You'll need to compute these on the fly or pre-load them
-    home_form = get_team_form(home)  # You need to implement this
+    home_form = get_team_form(home)
     away_form = get_team_form(away)
     home_gd_avg = get_team_gd_avg(home)
     away_gd_avg = get_team_gd_avg(away)
@@ -130,10 +189,10 @@ def predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutra
         'avg_elo': (home_elo + away_elo) / 2,
         'is_friendly': 0,
         'is_neutral': 1 if neutral else 0,
-        'home_form': home_form,      # ✅ NEW
-        'away_form': away_form,      # ✅ NEW
-        'home_gd_avg': home_gd_avg,  # ✅ NEW
-        'away_gd_avg': away_gd_avg   # ✅ NEW
+        'home_form': home_form,
+        'away_form': away_form,
+        'home_gd_avg': home_gd_avg,
+        'away_gd_avg': away_gd_avg
     }])
     
     X_scaled = scaler.transform(features[feature_cols])
@@ -157,37 +216,30 @@ def simulate_penalty_shootout():
     return score1, score2, round_num - 1
 
 def simulate_match_score(home, away, elo_dict, model, scaler, feature_cols, neutral=True):
-    # Get match probabilities from the model
-    probs = predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutral=True)
+    probs = predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutral)
     outcome = np.random.choice([0, 1, 2], p=probs)
     
     home_elo = elo_dict.get(home, 1500)
     away_elo = elo_dict.get(away, 1500)
     
-    # ===== POISSON DISTRIBUTION =====
-    # Calculate expected goals based on Elo difference
     elo_diff = (home_elo - away_elo) / 400
     home_expected = 1.2 * (1 + 0.1 * elo_diff)
     away_expected = 1.2 * (1 - 0.1 * elo_diff)
     
-    # Ensure minimum expected goals
     home_expected = max(0.3, home_expected)
     away_expected = max(0.3, away_expected)
     
-    # Sample from Poisson distribution
     home_goals = np.random.poisson(home_expected)
     away_goals = np.random.poisson(away_expected)
     
-    # Adjust to match the model's outcome prediction
-    # If the model predicted a draw but scores are different, adjust
-    if outcome == 1:  # draw
+    if outcome == 1:
         if home_goals != away_goals:
             avg = (home_goals + away_goals) // 2
             home_goals, away_goals = avg, avg
-    elif outcome == 2:  # home win
+    elif outcome == 2:
         if home_goals <= away_goals:
             home_goals = max(home_goals, away_goals + 1)
-    else:  # away win
+    else:
         if away_goals <= home_goals:
             away_goals = max(away_goals, home_goals + 1)
     
@@ -231,34 +283,23 @@ def simulate_group_stage(groups, elo_dict, model, scaler, feature_cols):
     return results, standings
 
 def generate_round_of_32(group_winners, group_runners):
-    """Generate 16 Round of 32 matches from 32 qualified teams."""
-    # Get all qualified teams (12 winners + 12 runners-up = 24 teams)
-    # We need 32 teams, so we add the 8 best 3rd place teams (simulated)
-    
     all_teams = []
-    
-    # Add group winners and runners-up
     for group in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']:
         if group in group_winners and group_winners[group]:
             all_teams.append(group_winners[group])
         if group in group_runners and group_runners[group]:
             all_teams.append(group_runners[group])
     
-    # If we have less than 32 teams, add random teams from groups
-    # This simulates the 8 best 3rd place teams
     all_group_teams = []
     for group in groups.values():
         all_group_teams.extend(group)
     
-    # Remove teams already in all_teams
     remaining_teams = [t for t in all_group_teams if t not in all_teams]
     random.shuffle(remaining_teams)
     
-    # Add 8 random teams to make 32
     needed = 32 - len(all_teams)
     all_teams.extend(remaining_teams[:needed])
     
-    # Shuffle and pair
     random.shuffle(all_teams)
     
     matches = []
@@ -269,7 +310,6 @@ def generate_round_of_32(group_winners, group_runners):
     return matches
 
 def run_full_tournament(groups, elo_dict, model, scaler, feature_cols):
-    # Group stage
     _, group_standings = simulate_group_stage(groups, elo_dict, model, scaler, feature_cols)
     
     group_winners = {}
@@ -280,7 +320,6 @@ def run_full_tournament(groups, elo_dict, model, scaler, feature_cols):
         if len(standings) > 1:
             group_runners[gn] = standings[1][0]
     
-    # Round of 32
     r32_pairs = generate_round_of_32(group_winners, group_runners)
     r32_matches = []
     r32_winners = []
@@ -289,7 +328,6 @@ def run_full_tournament(groups, elo_dict, model, scaler, feature_cols):
         r32_matches.append(result)
         r32_winners.append(result[6])
     
-    # Round of 16
     r16_matches = []
     r16_winners = []
     for i in range(0, len(r32_winners), 2):
@@ -298,7 +336,6 @@ def run_full_tournament(groups, elo_dict, model, scaler, feature_cols):
             r16_matches.append(result)
             r16_winners.append(result[6])
     
-    # Quarter-finals
     qf_matches = []
     qf_winners = []
     for i in range(0, len(r16_winners), 2):
@@ -307,7 +344,6 @@ def run_full_tournament(groups, elo_dict, model, scaler, feature_cols):
             qf_matches.append(result)
             qf_winners.append(result[6])
     
-    # Semi-finals
     sf_matches = []
     sf_winners = []
     sf_teams = qf_winners[:4]
@@ -317,7 +353,6 @@ def run_full_tournament(groups, elo_dict, model, scaler, feature_cols):
             sf_matches.append(result)
             sf_winners.append(result[6])
     
-    # Third place match
     third_matches = []
     third_winner = None
     sf_losers = [t for t in sf_teams if t not in sf_winners]
@@ -326,7 +361,6 @@ def run_full_tournament(groups, elo_dict, model, scaler, feature_cols):
         third_matches.append(result)
         third_winner = result[6]
     
-    # Final
     final_matches = []
     champion = None
     runner_up = None
@@ -362,12 +396,12 @@ def display_match(match):
     if penalty:
         st.markdown(f"<div style='font-size:0.7rem;color:#aaa;text-align:center;'>Penalties: {penalty}</div>", unsafe_allow_html=True)
 
-# --- Monte Carlo ---
+# ============================================================
+# MONTE CARLO
+# ============================================================
 @st.cache_data(ttl=3600)
 def run_monte_carlo(groups_dict, elo_dict, num_simulations):
     model, scaler, feature_cols = load_model()
-    if model is None:
-        return {}
     
     results = {}
     for _ in range(num_simulations):
@@ -412,18 +446,21 @@ def run_monte_carlo(groups_dict, elo_dict, num_simulations):
     
     return results
 
-# --- UI ---
+# ============================================================
+# UI
+# ============================================================
 st.markdown('<div class="main-header"><h1>🏆 FIFA World Cup 2026</h1><p>Predictor & Simulation Engine</p></div>', unsafe_allow_html=True)
 
 model, scaler, feature_cols = load_model()
 elo_dict = load_elo_data()
 
-if model is None or not elo_dict:
-    st.stop()
+if not elo_dict:
+    st.warning("⚠️ No team data available. Using default ratings.")
+    elo_dict = {team: 1500 for group in groups.values() for team in group}
 
 with st.sidebar:
     st.markdown("⚙️ Controls")
-    st.markdown(f"**Teams:** 48\n**Groups:** 12\n**Model:** XGBoost + Elo")
+    st.markdown(f"**Teams:** 48\n**Groups:** 12\n**Model:** {'XGBoost' if model else 'Demo Mode'}")
     if st.button("🔄 New Simulation", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
@@ -468,7 +505,6 @@ with tab2:
     
     data = run_full_tournament(groups, elo_dict, model, scaler, feature_cols)
     
-    # Medal Stand (Top 3 ABOVE bracket)
     st.markdown("### 🏅 Final Standings")
     col1, col2, col3 = st.columns(3)
     
@@ -504,7 +540,6 @@ with tab2:
     
     st.divider()
     
-    # Bracket
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
@@ -577,7 +612,7 @@ with tab3:
     if 'mc_runs' not in st.session_state:
         st.session_state['mc_runs'] = 0
     
-    num_sims = st.slider("Number of simulations", 100, 50000, 10000, step=100)
+    num_sims = st.slider("Number of simulations", 100, 5000, 1000, step=100)
     
     if st.button("🏃 Run Monte Carlo", type="primary", use_container_width=True):
         with st.spinner(f"Running {num_sims} simulations..."):
