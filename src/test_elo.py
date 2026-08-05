@@ -9,7 +9,6 @@ df = compute_elo(
     df, 
     initial_rating=1500, 
     k=30, 
-    home_advantage=100, 
     margin_multiplier=0.5,
     friendly_reduction=0.5
 )

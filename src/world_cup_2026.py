@@ -305,7 +305,7 @@ def main():
     from data_loader import load_data
     
     df = load_data()
-    df = compute_elo(df)
+    df = compute_elo(df, initial_rating=1500, k=30, margin_multiplier=0.5)
     
     latest_elos = {}
     all_teams = set(df['home_team']).union(set(df['away_team']))

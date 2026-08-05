@@ -1,20 +1,8 @@
 import pandas as pd
 import numpy as np
 
-def compute_elo(df: pd.DataFrame, 
-                initial_rating: float = 1500.0, 
-                k: float = 30.0,
-                home_advantage: float = 100.0,
-                margin_multiplier: float = 0.5,
-                friendly_reduction: float = 0.5) -> pd.DataFrame:
-    """
-    Compute Elo ratings for each team over time.
-    
-    Returns:
-        df with columns: 'home_elo', 'away_elo', 'home_elo_after', 'away_elo_after'
-    """
+def compute_elo(df, initial_rating=1500, k=30, margin_multiplier=0.5):
     df = df.sort_values('date').reset_index(drop=True)
-    
     ratings = {}
     home_elo_list = []
     away_elo_list = []
@@ -33,23 +21,19 @@ def compute_elo(df: pd.DataFrame,
         if away not in ratings:
             ratings[away] = initial_rating
         
-        # Get current ratings (before match)
         r_home_before = ratings[home]
         r_away_before = ratings[away]
         
-        # Apply home advantage
-        r_home = r_home_before + home_advantage
+        # No home advantage
+        r_home = r_home_before
         r_away = r_away_before
         
-        # Store pre-match Elo
         home_elo_list.append(r_home_before)
         away_elo_list.append(r_away_before)
         
-        # Expected scores
         exp_home = 1 / (1 + 10 ** ((r_away - r_home) / 400))
         exp_away = 1 - exp_home
         
-        # Actual result
         if home_score > away_score:
             actual_home = 1.0
             actual_away = 0.0
@@ -60,20 +44,49 @@ def compute_elo(df: pd.DataFrame,
             actual_home = 0.0
             actual_away = 1.0
         
-        # Adjust K-factor
+        # ===== TOURNAMENT IMPORTANCE WEIGHTING =====
         k_effective = k
-        if 'Friendly' in tournament:
-            k_effective = k * friendly_reduction
+        
+        # Base multipliers
+        if 'World Cup' in tournament:
+            k_effective = k * 2.5
+        elif 'Euro' in tournament or 'European' in tournament:
+            k_effective = k * 2.0
+        elif 'Copa America' in tournament:
+            k_effective = k * 1.8
+        elif 'Africa Cup' in tournament or 'AFCON' in tournament:
+            k_effective = k * 1.6
+        elif 'Asian Cup' in tournament:
+            k_effective = k * 1.4
+        elif 'CONCACAF Gold Cup' in tournament:
+            k_effective = k * 1.3
+        # Qualifiers
+        elif 'qualifier' in tournament.lower():
+            if 'UEFA' in tournament or 'European' in tournament:
+                k_effective = k * 1.8
+            elif 'CONMEBOL' in tournament:
+                k_effective = k * 1.6
+            elif 'CAF' in tournament or 'Africa' in tournament:
+                k_effective = k * 1.3
+            elif 'AFC' in tournament or 'Asian' in tournament:
+                k_effective = k * 1.2
+            else:
+                k_effective = k * 1.1
+        elif 'Friendly' in tournament:
+            k_effective = k * 0.5
+        # Nations League
+        elif 'Nations League' in tournament:
+            k_effective = k * 1.5
+        else:
+            k_effective = k
         
         goal_diff = abs(home_score - away_score)
         if goal_diff > 0:
             k_effective = k_effective * (1 + margin_multiplier * np.log(goal_diff + 1))
         
-        # Update ratings
         ratings[home] += k_effective * (actual_home - exp_home)
         ratings[away] += k_effective * (actual_away - exp_away)
         
-        # Store post-match Elo
         home_elo_after_list.append(ratings[home])
         away_elo_after_list.append(ratings[away])
     

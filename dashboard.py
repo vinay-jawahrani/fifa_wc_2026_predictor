@@ -122,24 +122,40 @@ def simulate_penalty_shootout():
     return score1, score2, round_num - 1
 
 def simulate_match_score(home, away, elo_dict, model, scaler, feature_cols, neutral=True):
+    # Get match probabilities from the model
     probs = predict_match_prob(home, away, elo_dict, model, scaler, feature_cols, neutral)
     outcome = np.random.choice([0, 1, 2], p=probs)
+    
     home_elo = elo_dict.get(home, 1500)
     away_elo = elo_dict.get(away, 1500)
+    
+    # ===== POISSON DISTRIBUTION =====
+    # Calculate expected goals based on Elo difference
     elo_diff = (home_elo - away_elo) / 400
-    home_expected = 0.8 + 0.1 * elo_diff
-    away_expected = 0.8 - 0.1 * elo_diff
-    home_goals = np.random.poisson(max(0, home_expected + np.random.normal(0, 0.2)))
-    away_goals = np.random.poisson(max(0, away_expected + np.random.normal(0, 0.2)))
-    if outcome == 1:
-        avg = (home_goals + away_goals) // 2
-        home_goals, away_goals = avg, avg
-    elif outcome == 2:
+    home_expected = 1.2 * (1 + 0.1 * elo_diff)
+    away_expected = 1.2 * (1 - 0.1 * elo_diff)
+    
+    # Ensure minimum expected goals
+    home_expected = max(0.3, home_expected)
+    away_expected = max(0.3, away_expected)
+    
+    # Sample from Poisson distribution
+    home_goals = np.random.poisson(home_expected)
+    away_goals = np.random.poisson(away_expected)
+    
+    # Adjust to match the model's outcome prediction
+    # If the model predicted a draw but scores are different, adjust
+    if outcome == 1:  # draw
+        if home_goals != away_goals:
+            avg = (home_goals + away_goals) // 2
+            home_goals, away_goals = avg, avg
+    elif outcome == 2:  # home win
         if home_goals <= away_goals:
             home_goals = max(home_goals, away_goals + 1)
-    else:
+    else:  # away win
         if away_goals <= home_goals:
             away_goals = max(away_goals, home_goals + 1)
+    
     return home_goals, away_goals, outcome
 
 def simulate_match_with_penalty(home, away, elo_dict, model, scaler, feature_cols):
