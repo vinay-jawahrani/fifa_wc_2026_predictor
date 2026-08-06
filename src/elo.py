@@ -71,7 +71,7 @@ def get_initial_rating(team, default=1500):
             return 1500 + (rating - 1000) * (700 / 850)
     return default
 
-def compute_elo(df, default_rating=1500, k=30, margin_multiplier=0.5):
+def compute_elo(df, initial_rating=1500, k=30, margin_multiplier=0.5):
     """
     Compute Elo ratings with:
     1. FIFA rankings post-2022 WC as initial ratings
@@ -96,9 +96,9 @@ def compute_elo(df, default_rating=1500, k=30, margin_multiplier=0.5):
         
         # Initialize teams with FIFA-based ratings
         if home not in ratings:
-            ratings[home] = get_initial_rating(home, default_rating)
+            ratings[home] = get_initial_rating(home, initial_rating)
         if away not in ratings:
-            ratings[away] = get_initial_rating(away, default_rating)
+            ratings[away] = get_initial_rating(away, initial_rating)
         
         r_home_before = ratings[home]
         r_away_before = ratings[away]
