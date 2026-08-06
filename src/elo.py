@@ -1,7 +1,86 @@
 import pandas as pd
 import numpy as np
 
-def compute_elo(df, initial_rating=1500, k=30, margin_multiplier=0.5):
+# FIFA Rankings post-2022 World Cup (December 2022)
+# These are the official FIFA rankings after the 2022 World Cup final
+# Includes all teams that qualified for WC 2026
+FIFA_RANKINGS_2022 = {
+    # CONMEBOL (South America) - 6 teams
+    'Argentina': 1838,
+    'Brazil': 1837,
+    'Uruguay': 1635,
+    'Colombia': 1624,
+    'Ecuador': 1589,
+    'Paraguay': 1526,
+    
+    # UEFA (Europe) - 16 teams
+    'France': 1823,
+    'Belgium': 1781,
+    'England': 1774,
+    'Netherlands': 1740,
+    'Croatia': 1727,
+    'Italy': 1723,
+    'Portugal': 1702,
+    'Spain': 1692,
+    'Switzerland': 1655,
+    'Germany': 1646,
+    'Denmark': 1623,
+    'Poland': 1589,
+    'Sweden': 1584,
+    'Austria': 1570,
+    'Ukraine': 1562,
+    'Turkey': 1558,
+    'Wales': 1556,  # Additional UEFA team
+    
+    # CONCACAF (North/Central America) - 3 teams (plus 3 hosts)
+    'USA': 1653,
+    'Mexico': 1644,
+    'Canada': 1537,
+    
+    # CAF (Africa) - 9 teams
+    'Morocco': 1672,
+    'Senegal': 1611,
+    'Nigeria': 1598,
+    'Egypt': 1576,
+    'Cameroon': 1571,
+    'Ghana': 1568,
+    'Mali': 1552,
+    'Algeria': 1550,
+    'Tunisia': 1535,
+    
+    # AFC (Asia) - 8 teams
+    'Japan': 1601,
+    'Iran': 1578,
+    'South Korea': 1565,
+    'Australia': 1559,
+    'Saudi Arabia': 1546,
+    'Qatar': 1532,
+    'United Arab Emirates': 1528,
+    'Iraq': 1519,
+    
+    # OFC (Oceania) - 1 team
+    'New Zealand': 1489,
+}
+
+def get_initial_rating(team, default=1500):
+    """Get initial Elo rating from FIFA rankings post-2022 WC, or default."""
+    # Try to match team name from dataset to FIFA rankings
+    for fifa_team, rating in FIFA_RANKINGS_2022.items():
+        if team == fifa_team or team in fifa_team or fifa_team in team:
+            # Map FIFA points (approx 1000-1850) to Elo (1500-2200)
+            return 1500 + (rating - 1000) * (700 / 850)
+    return default
+
+def compute_elo(df, default_rating=1500, k=30, margin_multiplier=0.5):
+    """
+    Compute Elo ratings with:
+    1. FIFA rankings post-2022 WC as initial ratings
+    2. K-factor based on opponent strength (not tournament)
+    3. Friendlies are excluded
+    """
+    # Filter out friendlies
+    df = df[~df['tournament'].str.contains('Friendly', case=False, na=False)].copy()
+    
     df = df.sort_values('date').reset_index(drop=True)
     ratings = {}
     home_elo_list = []
@@ -14,12 +93,12 @@ def compute_elo(df, initial_rating=1500, k=30, margin_multiplier=0.5):
         away = row['away_team']
         home_score = row['home_score']
         away_score = row['away_score']
-        tournament = row.get('tournament', '')
         
+        # Initialize teams with FIFA-based ratings
         if home not in ratings:
-            ratings[home] = initial_rating
+            ratings[home] = get_initial_rating(home, default_rating)
         if away not in ratings:
-            ratings[away] = initial_rating
+            ratings[away] = get_initial_rating(away, default_rating)
         
         r_home_before = ratings[home]
         r_away_before = ratings[away]
@@ -44,42 +123,21 @@ def compute_elo(df, initial_rating=1500, k=30, margin_multiplier=0.5):
             actual_home = 0.0
             actual_away = 1.0
         
-        # ===== TOURNAMENT IMPORTANCE WEIGHTING =====
-        k_effective = k
+        # ===== K-FACTOR BASED ON OPPONENT STRENGTH =====
+        # Stronger opponent = higher K-factor (more rating change)
+        # Weaker opponent = lower K-factor (less rating change)
         
-        # Base multipliers
-        if 'World Cup' in tournament:
-            k_effective = k * 2.5
-        elif 'Euro' in tournament or 'European' in tournament:
-            k_effective = k * 2.0
-        elif 'Copa America' in tournament:
-            k_effective = k * 1.8
-        elif 'Africa Cup' in tournament or 'AFCON' in tournament:
-            k_effective = k * 1.6
-        elif 'Asian Cup' in tournament:
-            k_effective = k * 1.4
-        elif 'CONCACAF Gold Cup' in tournament:
-            k_effective = k * 1.3
-        # Qualifiers
-        elif 'qualifier' in tournament.lower():
-            if 'UEFA' in tournament or 'European' in tournament:
-                k_effective = k * 1.8
-            elif 'CONMEBOL' in tournament:
-                k_effective = k * 1.6
-            elif 'CAF' in tournament or 'Africa' in tournament:
-                k_effective = k * 1.3
-            elif 'AFC' in tournament or 'Asian' in tournament:
-                k_effective = k * 1.2
-            else:
-                k_effective = k * 1.1
-        elif 'Friendly' in tournament:
-            k_effective = k * 0.5
-        # Nations League
-        elif 'Nations League' in tournament:
-            k_effective = k * 1.5
-        else:
-            k_effective = k
+        # Base K is higher if you're playing a strong team
+        opponent_strength = (r_home + r_away) / 2  # Average Elo of both teams
         
+        # K-factor scales with opponent strength
+        # Range: ~15 (weak opponents) to ~45 (strong opponents)
+        k_effective = k * (1 + (opponent_strength - 1500) / 1000)
+        
+        # Clamp to reasonable range
+        k_effective = max(15, min(45, k_effective))
+        
+        # Margin of victory adjustment
         goal_diff = abs(home_score - away_score)
         if goal_diff > 0:
             k_effective = k_effective * (1 + margin_multiplier * np.log(goal_diff + 1))
