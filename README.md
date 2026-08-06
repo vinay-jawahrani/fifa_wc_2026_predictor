@@ -30,17 +30,6 @@ A full-stack machine learning application that predicts match outcomes and simul
 | **Data Processing** | Pandas, NumPy |
 | **Deployment** | Railway |
 
-## 📌 API Endpoints (Backend)
-
-| Endpoint | Description |
-|----------|-------------|
-| `/weather` | Weather data (cached) |
-| `/news` | Top news headlines |
-| `/quotes` | Random quote |
-| `/dashboard` | Aggregated data from all services |
-
-> **Note:** The API Gateway endpoints are included for reference. The main app is the Streamlit dashboard.
-
 ## 📁 Project Structure
 fifa_wc_2026_predictor/
 ├── app/
